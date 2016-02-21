@@ -161,6 +161,6 @@ Ingest Data跟哪个Node上的数据是相似的呢? 具体算法不得而知, �
 
 Dedupe是Backup领域的一个永恒主题. Dedupe的理论和实践这么多年来幷没有大的提升, 但是随着新的应用
 场景比如VM环境, 新的硬件出现比如SSD, Scale-out的需求, Restore的需求, copy management, integrated,
-这事还远没有完.
+converged, 这事还远没有完.
 
 _TODO: 加入图片_
