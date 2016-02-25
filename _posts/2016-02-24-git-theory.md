@@ -13,7 +13,7 @@ Git的出现改变了这种状况, 虽然还有些公司仍然在用其他VCS工
 不过完全是不得已而为之. 老的项目可能因为这种那种原因不得不继续使用以前的工具,
 对于新的项目, 绝大多数人都会认真考虑Git, 甚至写博客都开始使用Github Pages了.
 
-## 基本概念
+## Basics
 
 如果只是使用Github Pages来写博客的话, 确实只要知道几个简单命令就可以开始了,
 但是想要发挥Git更好的作用, 了解add/commit几个命令是远远不够的.
@@ -42,7 +42,8 @@ Git的出现改变了这种状况, 虽然还有些公司仍然在用其他VCS工
 	都会生成一个Snapshot. Snapshot可以由一颗指向Root的Tree来表示. 当然Commit
 	除了指向Tree外, 还包含一些额外的信息比如Author/Committer/Timestamp/Message
 	等等, 当然如果不是第一个Commit的话, 还有Parent指针, 通过这个指针可以遍历
-	Git的历史记录. 顺便说一下, Snapshot能极大地提升访问速度, 这意味着任意版本
+	Git的历史记录, 如果是Merge的话, 一个Commit会有2个甚至更多的Parents.
+	顺便说一下, Snapshot能极大地提升访问速度, 这意味着任意版本
 	的文件都是静态的完整的, 而不需要通过Patch去合成. 虽然这看起来会额外地占用
 	一些磁盘空间, 但是Git也提供了Dedupe和压缩的功能. 这同样使用了跟存储领域相似
 	的技术, 也就是在Dedupe/Snapshot的时候, 让以前的Snapshot指向最新的Snapshot,
@@ -69,6 +70,36 @@ Git的出现改变了这种状况, 虽然还有些公司仍然在用其他VCS工
 * Git Directory - Git在本地的仓库, 所有已经Commit的内容都放在这里.
 
 ![](https://github.com/progit/progit2/blob/master/book/02-git-basics/images/lifecycle.png?raw=true)
+
+### Operations
+
+掌握了Git的基本概念之后, 就很容易掌握Git的基本操作. 
+
+首先需要有一个Git本地的仓库, 这可以通过初始化一个本地仓库
+	$ git init
+或者Clone一个远程的仓库, 比如Clone我的Github Pages:
+	$ git clone ssh://git@github.com/atwufei/atwufei.github.io
+Git支持很多协议, 这里使用ssh是为了免去每次Commit时输入用户名密码, 当然这需要
+先把公钥放到Github服务器上.
+
+有了本地仓库后, 就可以Edit/Commit你的修改了.
+	$ vim something
+	$ git add something
+	$ git commit -m "Add something"
+这样就创建了本地的一个Commit, 但是这个Commit还没有同步到Remote Repository上.
+如果在Remote上有写权限, 可以通过Push把本地的修改Checkin到Remote上.
+	$ git push
+当然Remote可能会拒绝这个Push操作, 因为已经有别人先Push过了, 这时候master(假设
+在这个Branch上)和remote/master不一致. Git Server并不会主动帮你去Merge, Server
+只会接受Fast-forward的Merge, 这个时候就需要
+	$ git pull
+这个操作会更新remote/master, 同时会对把它Merge进本地master. 如果Merge没有冲突,
+那么这个时候就可以再次Push
+	$ git push
+只要这个时间窗口没有人再Push了, 这个时候就能成功了, 因为Local的Branch HEAD是
+Remote Branch的子孙, 这样就可以形成一个Fast-forward Merge了.
+
+### Branch
 
 ### 版本号
 
