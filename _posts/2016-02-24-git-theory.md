@@ -69,47 +69,156 @@ Git的出现改变了这种状况, 虽然还有些公司仍然在用其他VCS工
 	通过add等命令stage了的文件会放在这里.
 * Git Directory - Git在本地的仓库, 所有已经Commit的内容都放在这里.
 
-![](https://github.com/progit/progit2/blob/master/book/02-git-basics/images/lifecycle.png?raw=true)
+<img src="https://github.com/progit/progit2/blob/master/book/02-git-basics/images/lifecycle.png?raw=true" alt="Drawing" style="width: 600px;"/>
 
-### Operations
+## Operations
+
+### Basic
 
 掌握了Git的基本概念之后, 就很容易掌握Git的基本操作. 
 
 首先需要有一个Git本地的仓库, 这可以通过初始化一个本地仓库
+
 	$ git init
+
 或者Clone一个远程的仓库, 比如Clone我的Github Pages:
+
 	$ git clone ssh://git@github.com/atwufei/atwufei.github.io
+
 Git支持很多协议, 这里使用ssh是为了免去每次Commit时输入用户名密码, 当然这需要
 先把公钥放到Github服务器上.
 
 有了本地仓库后, 就可以Edit/Commit你的修改了.
+
 	$ vim something
 	$ git add something
 	$ git commit -m "Add something"
+
 这样就创建了本地的一个Commit, 但是这个Commit还没有同步到Remote Repository上.
 如果在Remote上有写权限, 可以通过Push把本地的修改Checkin到Remote上.
+
 	$ git push
+
 当然Remote可能会拒绝这个Push操作, 因为已经有别人先Push过了, 这时候master(假设
 在这个Branch上)和remote/master不一致. Git Server并不会主动帮你去Merge, Server
 只会接受Fast-forward的Merge, 这个时候就需要
+
 	$ git pull
+
 这个操作会更新remote/master, 同时会对把它Merge进本地master. 如果Merge没有冲突,
-那么这个时候就可以再次Push
-	$ git push
-只要这个时间窗口没有人再Push了, 这个时候就能成功了, 因为Local的Branch HEAD是
-Remote Branch的子孙, 这样就可以形成一个Fast-forward Merge了.
+那么这个时候就可以再次Push.  只要这个时间窗口没有人再Push了, 这个时候就能成功了,
+因为Local的Branch HEAD是Remote Branch的子孙, 这样就可以形成一个Fast-forward Merge了.
 
 ### Branch
 
-### 版本号
+不到长城非好汉, 没用过Branch也就谈不上熟悉Git. Branch在Git是非常轻量级, 它就是
+一个可移动的指针, 指向某一个Commit. 当有新Commit的时候, Branch就移动到这个Commit上.
 
-git log -S
-git log --since
-$ git remote show origin
-HEAD (Git branching)
-In Git, HEAD is a pointer to the local branch you’re currently on
-$ git log --decorate --oneline
-fast-forward
-multiple parents
-git rebase -i Make a list of the commits which are about to be rebased. Let the user edit that list before rebasing
+在本地创建一个Branch, 或者同时创建和Checkout:
 
+	$ git branch
+	$ git checkout -b
+
+也可以查看Local或者Remote的Branches:
+
+	$ git branch -a
+	* editing
+	  master
+	  remotes/origin/HEAD -> origin/master
+	  remotes/origin/editing
+	  remotes/origin/master
+
+这是我Github Pages的Branches, Pages会把master Branch的内容处理然后当成博客呈现出来.
+因为我不想show一篇没完的博客, 我会先把未完成的文章都Commit到editing Branch, 然后push
+editing到Pages上去. 这样别人就不会看到临时未完成的博客, 而同时又能够把它存到Pages上去.
+
+	$ vim _posts
+	$ git add _posts
+	$ git commit -m "Add new one"
+	$ git push origin editing
+
+当博客写完了, 我可以先把editing Merge到master, 然后在把master Push到Remote Server上,
+这样就把博客发布了.
+
+#### Merge/Rebase
+
+一般来说, 把一个Branch的Commits搬到另一个Branch上主要有2种方法: Merge和Rebase.
+比如我们想把topic的内容合并到当前的Branch master上
+
+                     A---B---C topic
+                    /
+               D---E---F---G master
+
+如果使用Merge的方法, 我们会得到这样的结果
+
+	$ git merge topic
+                     A---B---C topic
+                    /         \
+               D---E---F---G---H master
+
+如果使用的是Rebase的方法
+
+	$ git rebase master topic
+                             A'--B'--C' topic
+                            /
+               D---E---F---G master
+
+可以看到Rebase后的History更加干净, 变成线性了, 也没有额外的Merge Commit.
+这两种方法没有好坏之分, 全看个人喜好. 需要注意的是, Rebase是修改了历史的,
+如果之前的历史已经被其他人/Commit引用了, 那会带来不必要的麻烦. 对于Merge,
+因为不存在修改Commit, 也就没有这个问题.
+
+由于Rebase能够修改记录, 所以还能实现很多其他的功能.
+
+	* --onto 选项
+	* -i 选项
+
+当然并不是只有Rebase才能修改历史, 比如git commit --amend就能修改最近的一个Commit.
+
+### Reset
+
+刚接触Git Reset可能觉得不是很容易理解, 其实很简单:
+
+	1. MOVE HEAD, --soft
+	2. UPDATING THE INDEX, --mixed
+	3. UPDATING THE WORKING DIRECTORY, --hard
+
+当然如果后面指定了具体的路径, 显然Step 1已经不可能执行了, 这时只会有后面2步.
+
+### Revision
+
+[Answer in stackoverflow](http://stackoverflow.com/questions/23303549/what-are-commit-ish-and-tree-ish-in-git)
+
+[Manpage](https://www.kernel.org/pub/software/scm/git/docs/gitrevisions.html)
+
+	----------------------------------------------------------------------
+	|    Commit-ish/Tree-ish    |                Examples
+	----------------------------------------------------------------------
+	|  1. <sha1>                | dae86e1950b1277e545cee180551750029cfe735
+	|  2. <describeOutput>      | v1.7.4.2-679-g3bee7fb
+	|  3. <refname>             | master, heads/master, refs/heads/master
+	|  4. <refname>@{<date>}    | master@{yesterday}, HEAD@{5 minutes ago}
+	|  5. <refname>@{<n>}       | master@{1}
+	|  6. @{<n>}                | @{1}
+	|  7. @{-<n>}               | @{-1}
+	|  8. <refname>@{upstream}  | master@{upstream}, @{u}
+	|  9. <rev>^                | HEAD^, v1.5.1^0
+	| 10. <rev>~<n>             | master~3
+	| 11. <rev>^{<type>}        | v0.99.8^{commit}
+	| 12. <rev>^{}              | v0.99.8^{}
+	| 13. <rev>^{/<text>}       | HEAD^{/fix nasty bug}
+	| 14. :/<text>              | :/fix nasty bug
+	----------------------------------------------------------------------
+	|       Tree-ish only       |                Examples
+	----------------------------------------------------------------------
+	| 15. <rev>:<path>          | HEAD:README.txt, master:sub-directory/
+	----------------------------------------------------------------------
+	|         Tree-ish?         |                Examples
+	----------------------------------------------------------------------
+	| 16. :<n>:<path>           | :0:README, :README
+	----------------------------------------------------------------------
+
+## End
+
+Git还有很多有用的功能, 需要的时候可以很容易找到相应的文档, 这里主要介绍一下
+基本概念, 有了这些知识, 就可以很容易理解其他的文档.
