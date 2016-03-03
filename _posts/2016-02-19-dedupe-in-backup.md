@@ -5,6 +5,8 @@ author: JamesW
 categories: Backup
 ---
 
+转载须注明出处：[www.wufei.org](http://www.wufei.org)
+
 * content 
 {:toc}
 
