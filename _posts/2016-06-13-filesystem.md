@@ -73,13 +73,14 @@ EXT2的元数据也就以上几种, 不过还有一种数据比较特殊. 由于
 
 如果是普通文件, 使用find_group_other()得到新创建文件inode的Block Group.
 
-1. 尽量和父目录放在一起. 如果只考虑文件本身和它的父目录, 这个会有意义吗? 这样的locality会带来读时的优化, 还是写时的优化? 其实并没有. 一般来说, data会和inode同属一个bg (block group), 读文件的时候, 先去读取父目录的data, 这里面会记录文件的inode, 然后从inode里面取得block的信息, 注意inode在bg里是放在开头的, 也就是说读的时候并不能减少seek时间, 甚至相反. 在创建的时候, 因为要同时修改文件的inode和父目录的inode, locality会带来好处? 不过和其他的rule联合起来, 这样做却很容易把有访问locality的文件聚集到一起, 从而提高性能. 如果真有必要弄清楚, 通过trace可以很容易作出判断, 有时候傻傻地想再多还不如动一下手.
+1. 尽量和父目录放在一起. 如果只考虑文件本身和它的父目录, 这个会有意义吗? 这样的locality会带来读时的优化, 还是写时的优化? 其实并没有. 一般来说, data会和inode同属一个bg (block group), 读文件的时候, 先去读取父目录的data, 这里面会记录文件的inode, 然后从inode里面取得block的信息, 注意inode在bg里是放在开头的, 也就是说读的时候并不能减少seek时间, 甚至相反. 在创建的时候, 因为要同时修改文件的inode和父目录的inode, locality会带来好处? 不过和其他的rule联合起来, 这样做却很容易把有访问locality的文件聚集到一起, 从而提高性能. 如果真有必要弄清楚, 通过trace可以很容易作出判断, 有时候想再多还不如动一下手.
 
 2. 尽量把相同目录下的文件放在一起. 假设用户访问文件有locality, 比如多进程编译kernel的时候, 同一个目录的文件会集中访问, 放在一起就可以有效地减少seek的时间 (不只inode, 还有inode对应文件的data block). 注意底下的iosched能对I/O进行排序和合并.
 
-3. 如果父目录所在的bg已经满了, 尽量岔开不同的目录. 如果还把这些目录的文件放在一起, 根据之前的经验, 新的bg也会有更大的概率便满. 这其实和2是一致的. 对应的代码如下:
-	group = (group + parent->i_ino) % ngroups;
-	for (i = 1; i < ngroups; i <<= 1) {}
+3. 如果父目录所在的bg已经满了, 尽量岔开不同的目录. 如果还把这些目录的文件放在一起, 根据之前的经验, 新的bg也会有更大的概率分配完. 这其实和2是一致的. 对应的代码如下:
+
+		group = (group + parent->i_ino) % ngroups;
+		for (i = 1; i < ngroups; i <<= 1) { /* select one from these groups */}
 
 对于新创建的目录, 老的方法find_group_dir()并没有讲究太多, 只是选出一个free inodes和free blocks相对较多的block group. 新方法find_group_orlov()考虑的更多一些, 不再详述. 如果有兴趣, 可以阅读一下这篇文章 [Locality and The Fast File System](http://pages.cs.wisc.edu/~remzi/OSTEP/file-ffs.pdf)
 
@@ -92,6 +93,8 @@ data block的分配可能显得更加重要, 访问data block一般来说比meta
 3. 尽量放在inode的bg
 
 除了这些努力之外, 另一个有效的办法就是预先reserve一片连续的磁盘空间, 虽然get_block()会尽量就近分配, 但有时却无奈其他文件分配的干扰. 比如文件A已经分配了block n, 本来正打算分配下一个block, 最好的选择就是Block n+1, 可是文件B恰好就已经分配了Block n+1. 为了避免这种情况, 预先reserve [n, n+window]是个比较好的选择. 更妙的是, 这个reserve并不需要浪费物理磁盘的空间, reserve整个是在内存中完成的, 当没有人再打开该文件的时候, 就可以释放reserve的区间. 一般来说, 我们会一次增加大量的数据, 而不是每打开一次增加一两个数据块, 所以这种内存reserve方式可以很好的工作.
+
+所有的这些尝试主要目的就是减少磁盘寻道的时间, 要检验它们的效果, 可以试试blktrace, seekwatcher等.
 
 # 文件的访问
 
