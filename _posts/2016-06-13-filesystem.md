@@ -98,3 +98,52 @@ data block的分配可能显得更加重要, 访问data block一般来说比meta
 
 # 文件的访问
 
+## page cache
+
+为了加速文件的访问, 系统中往往会使用某种类型的cache, 除非指定directIO, Linux中文件的读写都会经过page cache. 和所有的cache一样, page cache的好处显而易见, 可以很大程度提高读写的速度, 不过又因为Cache的存在, 数据并没有直接写到disk上, 所以有数据丢失的风险. 在更早以前, 同一个block甚至会在内存中存在于2个子系统之中, 分别为page cache和buffer cache, 当然现在已经合二为一, 对这段历史感兴趣的可以参考 [UBC: An Efficient Unified I/O and Memory Caching Subsystem for NetBSD](https://www.usenix.org/legacy/event/usenix2000/freenix/full_papers/silvers/silvers_html/)
+
+即使是现在, /proc/meminfo中还是有:
+
+	Buffers:           96468 kB
+	Cached:          1698812 kB
+
+不过Buffers的值表示属于block device的page cache, 比如直接去访问raw device, 或者是文件系统的metadata. Cached的值表示普通文件的page cache.
+
+	bufferram = nr_blockdev_pages();
+	cached = global_page_state(NR_FILE_PAGES) - total_swapcache_pages – i.bufferram;
+
+虽说现在已经没有单独的page cache和buffer cache, 但是同一磁盘block还是可能存在于不同的内存page中.
+
+* 通过普通文件接口访问一个block
+* 通过raw disk device接口直接访问同一个block
+
+kernel并不会保证这两份内存数据保持同步, 这是使用者需要考虑的事, 一般来说并不推荐同时使用这2种方法同时访问一个block. 但有的时候却不可避免, EXT3的时候会讲到, 这就要求EXT3的代码小心处理.
+
+### address_space
+
+那么page cache是怎么组织的呢? 属于同一文件, 更精确地说, 同一inode的page cache会集中起来放到一个address_space的数据结构中, 该数据结构使用radix tree来存放page cache. radix tree并不复杂, 主要就是实现文件偏移到page的映射, 所以radix tree有点类似页表, 只不过页表是固定层级. address_space另一个重要的成员是address_space_operations, 这些回调函数定义了怎么操作page cache, 比如要读入一个page应该怎么做, 每个文件系统都需要实现这个接口. 
+
+![]({{ "/css/pics/fs/radix-tree.png"}})
+
+### buffer_head
+
+虽然已经有单独的buffer cache, 文件系统的最小单元依然还是block, 一个page可以包含一个或多个block. 在文件系统创建的时候, block size就确定了. 当用户通过read/write系统调用访问某块disk block的时候, 一般会经过这些步骤:
+
+1. 映射[struct file, file->f_pos]到一个page, 该page->mapping对应到这个文件, page->index对应到f_pos
+2. 映射page到若干个buffer_head, 这里主要的任务是根据[page->mapping, page->index]找到block在块设备上的地址, 也就是[bh->b_bdev, bh->b_blocknr], 这需要文件系统get_block的帮助. 有了buffer_head的这些信息, 就可以通过submit_bh去读写磁盘上的数据.
+
+简单地说, buffer_head就是用来记录page到磁盘block的映射.
+
+![]({{ "/css/pics/fs/buffer_head.png"}})
+
+## file access
+
+### read
+
+### write
+
+### mmap
+
+# EXT3/Journal
+
+*未完待续*
