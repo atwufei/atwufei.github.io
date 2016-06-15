@@ -28,7 +28,7 @@ categories: Kernel
 
 ![]({{ "/css/pics/fs/dir-file-1.png"}})
 
-虽然能够完成任务, 但却不够好. 表2的条目相对较大, 需要存储数据块的引用, 还包括一些其他的元数据, 这样就会导致一条目录项变得很大, 从而导致一个Block能够只能存储有限数目的文件, 这样对文件的查找是非常不利的, 因为可能需要更多的磁盘访问. 但是如果直接使用文件名去关联2张表的话, 也不是什么好主意, 所以在Unix文件系统里, 每一个文件都会对应到一个数字(index), 通过这个文件系统唯一的编号就可以快速地找出文件所有内容的磁盘位置. 简单地说, inode就是这个index, 再加上其他的一些元数据. inode还有另外的一个小小的好处, 就是可以很容易实现硬链接(hard link).
+虽然能够完成任务, 但却不够好. 表2的条目相对较大, 需要存储数据块的引用, 还包括一些其他的元数据, 这样就会导致一条目录项变得很大, 从而导致一个block能够只能存储有限数目的文件, 这样对文件的查找是非常不利的, 因为可能需要更多的磁盘访问. 但是如果直接使用文件名去关联2张表的话, 也不是什么好主意, 所以在Unix文件系统里, 每一个文件都会对应到一个数字(index), 通过这个文件系统唯一的编号就可以快速地找出文件所有内容的磁盘位置. 简单地说, inode就是这个index, 再加上其他的一些元数据. inode还有另外的一个小小的好处, 就是可以很容易实现硬链接(hard link).
 
 ![]({{ "/css/pics/fs/dir-file-2.png"}})
 
@@ -48,14 +48,14 @@ EXT2作为经典的文件系统, 又不失简单高效, 非常适合入门.
 
 一个block group包含这些元素:
 
-* super Block: 用于记录整个文件系统的信息. 虽然每个group都包含了一个super block, 但是 并不要求严格统一. 话说即使这些super block都是同步的, 如果group 0 的super block坏了, 是否就可以通过其他的来修复呢? 我们当然是这么期望的, 不过现在好多的disk, 不要说AFA, 即使是普通的SSD盘, 都有可能集成去重功能(Dedup), 也就是说相同的数据在磁盘上可能只有一份拷贝.  也就是说, 上层文件系统想通过冗余来改善系统的稳定性, 下层却把冗余给去重了. 这样看来, 同步倒还不如不同步了, 不同步至少减少了Dedup的可能. 由此可见, 一个好的约定, 理解对方的需求是多么重要, 否则两边都给出了完美的解决方案, 合在一起却不能达到预期的效果.
+* super block: 用于记录整个文件系统的信息. 虽然每个group都包含了一个super block, 但是 并不要求严格统一. 话说即使这些super block都是同步的, 如果group 0 的super block坏了, 是否就可以通过其他的来修复呢? 我们当然是这么期望的, 不过现在好多的disk, 不要说AFA, 即使是普通的SSD盘, 都有可能集成去重功能(Dedup), 也就是说相同的数据在磁盘上可能只有一份拷贝.  也就是说, 上层文件系统想通过冗余来改善系统的稳定性, 下层却把冗余给去重了. 这样看来, 同步倒还不如不同步了, 不同步至少减少了Dedup的可能. 由此可见, 一个好的约定, 理解对方的需求是多么重要, 否则两边都给出了完美的解决方案, 合在一起却不能达到预期的效果.
 
 * group descriptors: 每个group的相应信息, 主要包括data block, inode bitmap和inode table的位置信息, 已经空闲block和inode的个数. 每个group不止包含自己的descriptor, 还有可能包含其他group的descriptor, 也就是说有冗余. 虽然说这个descriptor的数据结构并不大, 但是每一个descriptor都占用了一个block, (如果多个group descriptors共用一个block, 担心修改其中的一个group descriptor会影响到其他的?  不太应该). 对于一个很大的文件系统, 如果每个group都需要保存所有的group descriptors, 这个space overhead会非常大, 所以应该是可配置的, 见descriptor_loc().
 
 * data block bitmap:
 * inode bitmap: 使用bitmap来标记对应的block或者inode是否已经分配, bitmap很适合快速地查找和分配空闲空间.
 
-* inode table: inode table顾名思义就是存放inode的地方, 每个inode的大小是一样的, 所以根据inode的号可以很容易就找到对应的inode. inode里面记录了文件相关的元数据, 比如说Owner, Mode, Size, 和各种各样的time, 更重要的是包括了文件block的指针, 通过这些指针就可以找到某个具体offset对应的内容. 中间的某些Block指针为0的情况也是允许的, 甚至变成了一个feature, 也就是hole, 这种情况下文件的size和磁盘的使用是不相等的.
+* inode table: inode table顾名思义就是存放inode的地方, 每个inode的大小是一样的, 所以根据inode的号可以很容易就找到对应的inode. inode里面记录了文件相关的元数据, 比如说Owner, Mode, Size, 和各种各样的time, 更重要的是包括了文件block的指针, 通过这些指针就可以找到某个具体offset对应的内容. 中间的某些block指针为0的情况也是允许的, 甚至变成了一个feature, 也就是hole, 这种情况下文件的size和磁盘的使用是不相等的.
 
 那么inode到底是怎么来描述一个文件的呢? 很多文件系统的教科书上都会有介绍, 而且基本上是跟EXT2一致的. 这种数据结构一定程度上体现了简单有效, 如果是小文件的, 可以很方便地使用12个direct addressing的指针就可以表示出整个文件, 如果更大的文件, 可以通过indirect block来引用. 虽然谈不上完美, 比如每个引用只能索引一个block, 也能较好的解决了问题.
 
@@ -71,7 +71,7 @@ EXT2的元数据也就以上几种, 不过还有一种数据比较特殊. 由于
 
 ### inode在哪里分配
 
-如果是普通文件, 使用find_group_other()得到新创建文件inode的Block Group.
+如果是普通文件, 使用find_group_other()得到新创建文件inode的block group.
 
 1. 尽量和父目录放在一起. 如果只考虑文件本身和它的父目录, 这个会有意义吗? 这样的locality会带来读时的优化, 还是写时的优化? 其实并没有. 一般来说, data会和inode同属一个bg (block group), 读文件的时候, 先去读取父目录的data, 这里面会记录文件的inode, 然后从inode里面取得block的信息, 注意inode在bg里是放在开头的, 也就是说读的时候并不能减少seek时间, 甚至相反. 在创建的时候, 因为要同时修改文件的inode和父目录的inode, locality会带来好处? 不过和其他的rule联合起来, 这样做却很容易把有访问locality的文件聚集到一起, 从而提高性能. 如果真有必要弄清楚, 通过trace可以很容易作出判断, 有时候想再多还不如动一下手.
 
@@ -92,7 +92,7 @@ data block的分配可能显得更加重要, 访问data block一般来说比meta
 2. 尽量靠近上一层indirect block
 3. 尽量放在inode的bg
 
-除了这些努力之外, 另一个有效的办法就是预先reserve一片连续的磁盘空间, 虽然get_block()会尽量就近分配, 但有时却无奈其他文件分配的干扰. 比如文件A已经分配了block n, 本来正打算分配下一个block, 最好的选择就是Block n+1, 可是文件B恰好就已经分配了Block n+1. 为了避免这种情况, 预先reserve [n, n+window]是个比较好的选择. 更妙的是, 这个reserve并不需要浪费物理磁盘的空间, reserve整个是在内存中完成的, 当没有人再打开该文件的时候, 就可以释放reserve的区间. 一般来说, 我们会一次增加大量的数据, 而不是每打开一次增加一两个数据块, 所以这种内存reserve方式可以很好的工作.
+除了这些努力之外, 另一个有效的办法就是预先reserve一片连续的磁盘空间, 虽然get_block()会尽量就近分配, 但有时却无奈其他文件分配的干扰. 比如文件A已经分配了block n, 本来正打算分配下一个block, 最好的选择就是block n+1, 可是文件B恰好就已经分配了block n+1. 为了避免这种情况, 预先reserve [n, n+window]是个比较好的选择. 更妙的是, 这个reserve并不需要浪费物理磁盘的空间, reserve整个是在内存中完成的, 当没有人再打开该文件的时候, 就可以释放reserve的区间. 一般来说, 我们会一次增加大量的数据, 而不是每打开一次增加一两个数据块, 所以这种内存reserve方式可以很好的工作.
 
 所有的这些尝试主要目的就是减少磁盘寻道的时间, 要检验它们的效果, 可以试试blktrace, seekwatcher等.
 
@@ -115,9 +115,9 @@ data block的分配可能显得更加重要, 访问data block一般来说比meta
 虽说现在已经没有单独的page cache和buffer cache, 但是同一磁盘block还是可能存在于不同的内存page中.
 
 * 通过普通文件接口访问一个block
-* 通过raw disk device接口直接访问同一个block
+* 通过block device访问同一个block
 
-kernel并不会保证这两份内存数据保持同步, 这是使用者需要考虑的事, 一般来说并不推荐同时使用这2种方法同时访问一个block. 但有的时候却不可避免, EXT3的时候会讲到, 这就要求EXT3的代码小心处理.
+kernel并不会保证这两份内存数据保持同步, 这是使用者需要考虑的事, 一般来说并不推荐同时使用这2种方法同时访问一个block. 直接使用dd之类操作block device当然可以避免, 但访问文件系统的metadata却不能避免, EXT3的时候会讲到, 这就要求EXT3的代码小心处理.
 
 ### address_space
 
@@ -140,10 +140,59 @@ kernel并不会保证这两份内存数据保持同步, 这是使用者需要考
 
 ### read
 
+我们已经说过, 只要不是directIO, 所有的读写操作都会经过page cache, 所以读写操作都是围绕着address_space进行的.
+
+1. 首先在page cache里面查找, 如果存在并且uptodate, cache命中, 直接拷贝到用户空间的buffer就好. 一般来说, Linux系统倾向于尽可能多的cache page, 真到需要free page的时候, 回收clean page cache是很快的.
+2. 如果不在page cache, 或者不是uptodate, 那就需要从磁盘里面去读取数据, 并存放到page cache. 这个过程会使用到address_space->a_ops->readpage(), 也就是说每个文件系统都需要实现一个address_space_operations, 由它来实现page cache的读取和写回. 对于大部分文件系统, 比如EXT2, readpage的实现会使用通用的函数加上自己的get_block()函数, 毕竟只有文件系统自己知道自己的disk layout, 也就是page和block number的mapping.
+
+这里说的通用函数有2个选择:
+
+* mpage_readpage
+* block_read_full_page
+
+这2个函数的主要区别就是要不要使用buffer_head
+
+* 如果该page对应的block刚好在disk上是连续的, 那么完全可以使用一个bio下去
+* 如果blocks不连续的话, 那mpage_readpage也没有办法, 同样调用block_read_full_page
+
+block_read_full_page为page里面的每一个block都生成一个buffer_head, 然后使用submit_bh把block一个一个往下发. 这2种方法并没有什么本质区别, 按理说mpage_readpage会稍微好点, 毕竟能够省掉buffer_head的空间开销, 但是对于disk I/O本身区别并不大, 即使拆分成多个bio下发, iosched仍然会尽可能的merge I/O, 所以文件系统对调用哪个函数并不特别讲究. 即使EXT2在readpage的时候使用的是mpage_readpage, 只要有write这个page的操作, 也一定会生成buffer_head, 更可以看出这两种方法并无太大区别.
+
 ### write
+
+相对于read, write复杂很多. 我们先来看一下generic_perform_write, 它的主要逻辑如下:
+
+	do {
+		status = a_ops->write_begin(file, mapping, pos, bytes, flags, &page, &fsdata);
+		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
+		status = a_ops->write_end(file, mapping, pos, bytes, copied, page, fsdata);
+		iov_iter_advance(i, copied);
+	} while (iov_iter_count(i));
+
+write复杂的逻辑主要在write_begin, 对于EXT2它会做这些事情:
+
+* 找到或者创建page cache, bufferred write必须经过page cache
+* 找到或者创建page cache对应的buffer_head
+* 调用get_block()读入整个chain, 从ext2_inode.i_block一直到指定的data block, 如果要写入的地址还未分配, 比如写到文件末尾或者是空洞, get_block会在磁盘上分配相应的空间
+* 如果get_block新分配了空间(buffer_new), 需要调用unmap_underlying_metadata(bh->b_bdev, bh->b_blocknr), 该调用会清除buffer cache alias (blkdev), 至于为什么要做这个, 在后面EXT3的时候会有详细介绍
+* 如果只是部分写block, 那么需要把磁盘上的block先读进来
 
 ### mmap
 
-# EXT3/Journal
+除了read/write系统调用外, mmap也可以用来访问文件. mmap把page cache直接映射到用户态地址空间, 在访问的时候便不再需要用户空间和内核空间之间拷贝, 所以对性能有一定的好处. 不过混用read/write和mmap并不是一个好的编程实践, 虽然Linux会尽量保证其正确性, 有的OS并不保证其正确性, 也就是说要么使用read/write, 要么使用mmap, 不要同时使用.
+
+同时使用read/write和mmap的结果就是同一个物理page可能会产生两个虚拟地址, 一个是mmap的用户态地址, 另一个是read/write时在内核临时映射的地址, 有alias就有可能有麻烦(就像page cache和buffer cache一样), 它们可能映射到不同的cache line里面, 也就导致没有机制对它们进行同步. 这种情况在VIVT和VIPT cache的CPU上有可能发生, 考虑这种情况:
+
+        int val = 0x11111111;
+        fd = open("abc", O_RDWR);
+        addr = mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+        *(addr+0) = 0x44444444;
+        tmp = *(addr+0);
+        *(addr+1) = 0x77777777;
+        write(fd, &val, sizeof(int));
+        close(fd);
+
+在我的这个[patch](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=931e80e4b3263db75c8e34f078d22f11bbabd3a3) (btw, 我为什么要故意用这个名字) 没有checkin之前, 文件的前两个integer变量有的时候会是0x44444444, 0x77777777, 并不总是我们期待的0x11111111, 0x77777777.
+
+# EXT3 文件系统
 
 *未完待续*
