@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Git - 入门到进阶
+title: Git Intro
 author: JamesW
 categories: Git
 ---
