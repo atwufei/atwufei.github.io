@@ -40,7 +40,9 @@ EXT2作为经典的文件系统, 又不失简单高效, 非常适合入门.
 
 ## 磁盘分布
 
-想要深入理解EXT2, 了解它的磁盘分布(Disk Layout)是必不可少的. 首先来看看它的整体分布, (本文大量使用 Understanding the Linux Kernel 的图表)
+想要深入理解EXT2, 了解它的磁盘分布(Disk Layout)是必不可少的. 首先来看看它的整体分布.
+
+**(本文大量使用 Understanding the Linux Kernel 的图表)**
 
 ![]({{ "/css/pics/fs/ext2-layout.png"}})
 
@@ -194,5 +196,77 @@ write复杂的逻辑主要在write_begin, 对于EXT2它会做这些事情:
 在我的这个[patch](https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=931e80e4b3263db75c8e34f078d22f11bbabd3a3) (btw, 我为什么要故意用这个名字) 没有checkin之前, 文件的前两个integer变量有的时候会是0x44444444, 0x77777777, 并不总是我们期待的0x11111111, 0x77777777.
 
 # EXT3 文件系统
+
+EXT2是个相对高效的文件系统, 它最大的缺陷在于没有足够的完整性保障. 在系统崩溃或者掉电的情况, 文件系统会处于一个不一致状态, 从而需要通过fsck去扫描整个文件系统, 并期待它把文件系统的metadata恢复到一致状态, 如果文件系统很大, 这是一个相当耗时的过程.  EXT3相对EXT2的主要改进就是通过journal来解决问题, 一般情况下EXT3的性能比EXT2还略差, 但是提高了完整性, 特别是metadata的完整性.
+
+## 日志
+
+### 事务机制
+
+#### update-in-place
+
+我们都知道, 所有的不一致性都来源于update-in-place. 如果直接覆写原有的地方, 数据就可能处于两个稳定状态之间的某个临时状态, 这个时候系统crash, 文件系统便会处于不一致状态. 解决的办法只有一个, 就是不要使用update-in-place, 当然怎么做到这点还是有不同方法的:
+
+* Log-structured fs - 使用这种方式的文件系统把新数据都写到空闲数据块, log可以是append模式, 也可以是系统中任意空闲的地方. 因为系统中存放了不同版本的数据, 所以可以很容易实现snapshot功能. 
+* Journaling fs - 把新数据写到一个专门的地方, 可以是一个文件系统内的一个特殊文件, 或者一个单独的设备. 这种文件系统最终还是会overwrite文件系统, 不过是在日志存在的情况下做的, 也就是说文件可以是修改前的状态, 或者修改后的状态, 但是两者只能选其一, 而不像Log-structured fs可以同时访问不同的版本.
+
+日志的实现也有不同的办法, 有的在日志里面存放更新的操作, 这种方法能够节省日志的空间, 有的在日志里存放更改后的数据, 这种方法更简单一点. EXT3的日志属于后一种.
+
+#### 原子操作
+
+那么什么操作物理上是原子的? 从磁盘角度看, 我们可以简单认为一个sector的读写是原子的, 要么一个字节都没写, 要么全写. 一般来说, 这个假设是没有问题的, 不过像数据库可能会有更宽松的假设 (假设的越少越可靠), 比如SQLite并不要求sector的写操作是原子的, 但是如果第二个字节被更新了, 可以认为第一个字节一定也被更新了. 有了这个基本的原子操作, 就可以很容易构建逻辑上的原子操作, 比如要写多个磁盘sector, 那么当且仅当最后一个commit sector被写入了, 才认为这整个操作完成.
+
+#### I/O顺序
+
+并不是说最后下发的I/O就会最后完成, 普通情况下I/O是乱序执行的, iosched可能会打乱顺序, 有的时候为了性能甚至是必须的, 磁盘本身也不保证顺序执行. 但是日志的commit操作肯定是有I/O顺序要求的, 以前的kernel是通过block层的barrier实现的, 基本思想就是drain queue然后flush disk write cache, 这样肯定会导致磁盘的性能大大降低, drain queue之后就不能接收I/O了. 之后的实现方法是让上层自己来实现, 而block layer只要实现flush操作, 也就是把数据flush到物理介质上. 比如jbd要实现transaction操作, 它只需要:
+
+1. 下发transaction的相关数据的I/O
+2. 等待1的I/O返回, 注意这个时候并不保证数据一定存放到物理介质上, 有可能还在write cache
+3. flush, 并且等待其返回
+4. 发送commit I/O
+5. flush, 并且等待其返回
+
+4和5可以通过FUA (Force Unit Access)简化. 经过这个优化, block层免去了drain queue的操作, 从而可以保证其他并行的I/O得以继续, 同时磁盘有一定的调整空间, 比如优先flush还是优先别的操作. [The end of block barriers](https://lwn.net/Articles/400541/)介绍了相应的背景.
+
+#### 独立性
+
+事务当然需要保证独立性, 2个事务互相影响那就不叫事务了. 当一个block已经被一个事务修改过, 这个时候新的事务要修改它该怎么办? 无他, 也就只能再拷贝一份. 如果是通过write()系统调用实现的话, 这个很容易实现, 因为文件系统有机会截获这个操作, 从而增加一份拷贝. 可是如果是通过mmap()然后直接写对应的地址空间呢? 文件系统不能感知到这个操作, 也不太可能通过pagefault来截获这个操作, 否则性能受不了. 首先mmap会影响磁盘分配吗? 如果日志模式采用journal怎么办? 这种情况就根本不应该用mmap?
+
+### 日志模式
+
+EXT3实现了3种不同的日志模式, 保护级别由低到高:
+
+* writeback - 只有metadata做日志, data允许 *在metadata写入日志之前* 写入磁盘
+* ordered - 只有metadata做日志, data必须 *在metadata写入日志之后* 写入磁盘
+* journal - data同样需要写入日志, 由于开销过大, 一般很少使用
+
+那么writeback和ordered的区别在哪?
+
+* 首先这两种模式都能保证metadata的一致性, 因为它们都会对metadata做日志.
+* writeback因为不保证data和metadata的顺序, 如果metadata先写入日志了, 但是data block还没有写入, 这个时候crash的话就会看到之前的data block, 如果是多用户系统, 这会是个安全问题. (新分配的data block)
+* 如果都是写老的数据块, 那这两种方式没有本质区别, metadata的修改可能只是涉及到一些timestamp的更新而已, 并不会涉及到metadata和data block的映射. 这个时候metadata等待data只是徒劳, 却引入依赖关系.
+* 两种方法都没法保证data的完整性, 这个需要上层应用比如SQLite来处理.
+
+虽然从这个角度看, ordered相对于writeback是有那么一点点优势, 不过由于需要保证data/metadata的写入顺序却可能引入性能方面的问题. 需要注意的是, 一个原子metadata的操作不仅仅依赖(等待写完)于它相关的data block, 还有它之前所有的metadata依赖的data block. 在我们公司的系统里, 很多因为fsync导致timeout的问题.
+
+![]({{ "/css/pics/fs/ext3-ordered.jpg"}})
+
+上图中如果要fsync(f6)的话, 需要按序写入所有的data和metadata. 我们也可以用fio来简单测试一下:
+
+	(1) fio --name=write-blocker --filename=data_blocker --rw=write --size=32G --bs=4k --runtime=150 &
+	(2) fio --name=write-$type --filename=data --rw=write --size=1G --bs=4k --fsync=1 --runtime=120	
+
+fsync在(2)的延时因为日志模式有很大变化.
+
+![]({{ "/css/pics/fs/ordered-writeback.png"}})
+
+[Solving the ext3 latency problem](https://lwn.net/Articles/328363/)也有相关的讨论.
+
+## 实现细节
+
+### EXT3 create example
+
+### unmap_underlying_metadata
+
 
 *未完待续*
