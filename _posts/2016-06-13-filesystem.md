@@ -175,7 +175,7 @@ write复杂的逻辑主要在write_begin, 对于EXT2它会做这些事情:
 * 找到或者创建page cache, bufferred write必须经过page cache
 * 找到或者创建page cache对应的buffer_head
 * 调用get_block()读入整个chain, 从ext2_inode.i_block一直到指定的data block, 如果要写入的地址还未分配, 比如写到文件末尾或者是空洞, get_block会在磁盘上分配相应的空间
-* 如果get_block新分配了空间(buffer_new), 需要调用unmap_underlying_metadata(bh->b_bdev, bh->b_blocknr), 该调用会清除buffer cache alias (blkdev), 至于为什么要做这个, 在后面EXT3的时候会有详细介绍
+* 如果get_block新分配了空间(buffer_new), 需要调用unmap_underlying_metadata(bh->b_bdev, bh->b_blocknr), 该调用会清除buffer cache alias (blkdev). 至于为什么要调用unmap_underlying_metadata(), 后面有讲.
 * 如果只是部分写block, 那么需要把磁盘上的block先读进来
 
 ### mmap
@@ -264,9 +264,98 @@ fsync在(2)的延时因为日志模式有很大变化.
 
 ## 实现细节
 
-### EXT3 create example
+### 基本概念
+
+* handle: 表示一个原子操作, 文件系统比如EXT3需要考虑的是把哪些操作加入到同一个handle, 才能保持文件系统的一致性.
+* transaction: 表示一个事务. 原子操作是通过事务来实现的, 一个原子操作一般只会修改几个block, 但是对于磁盘来说, 小块的I/O对性能有很大的影响的, 所以JBD把多个handle组合成一个transaction. 这样做还有别的好处, 比如属于同一个transaction的两个handle都写同一个block, 那么并不需要写两次磁盘, 也就是说这个写操作是可以合并的, 当然不能跨越transaction. transaction的事务性通过最后一个commit block (sector) 来实现, 也就是说这个sector写成了, transaction就可以认为已经完成, 如果这个sector没写, 则transaction需要保证它里面的所有handle都没发生. 一个sector写操作的原子性是由磁盘保证的.
+
+### 基本操作
+
+* journal_start: 开始一个原子操作
+* journal_stop: 结束一个原子操作
+
+* journal_get_create_access: 取得新分配块的写权限, 对于data != journal的模式, 所谓新分配块就只有文件的indirect block一种情况. 该函数会把输入的buffer_head纳入到jbd管理. 
+
+* journal_get_write_access: 在准备修改某块(和buffer_head有时候混用)之前, 需要调用该函数. 有一点需要注意的是, 如果这个block也出现在之前的transaction(*j_committing_transaction*)里面, 显然两个transaction不同同时修改同一个block, 否则根本就保证不了独立性, 那么在这种情况下就必须copy一份(*jh->b_frozne_data*)供之前的transaction使用. 如果之前的transaction正在往磁盘写这个block的话, 因为不能再copy一份给它了, 只有先等它结束, 否则新的write可能就导致之前的transaction写入不一致的数据.
+
+		block n in t1			block n in t2
+		-------------------		-------------------
+		|   frozen data   |		| ready to change |
+		-------------------		-------------------
+
+* journal_get_undo_access: 释放一个block的时候, 会通过data block bitmap相应的某位置为0. 如果该操作还未写入日志, 就把该block重新分配出去, 那么对应的data block就可能写入了新的数据, 注意data block一般情况(data != journal)下, 是可以在metadata的日志写磁盘之前先写到磁盘的. 这个操作是不可逆的, 因为data block并没有做journal. 所以在释放data block的之前, 需要先调用journal_get_undo_access把data block bitmap拷贝到jh->b_committed_data, 在block分配的时候就会去查这里的内容, 而不是本身的bitmap_bh. 不过为什么在分配的时候(ext3_try_to_allocate_with_rsv)也会调用这个函数?
+
+				   data block bitmap	[block 0 data]
+		handle 1: (*0* 1 1 1 1 1 1 1)	[stale data]	<- fail to commit
+		handle 2: (*1* 1 1 1 1 1 1 1)	[newle data]	<- data (!journaled) committed before t1
+
+* journal_dirty_data: 在ordered模式中, 如果修改了data block, 需要调用这个函数, 主要作用就是保证data block在metadata之前先commit, writeback模式并不需要, 对于journal模式, 所有的写都是metadata.
+
+* journal_dirty_metadata: 修改了metadata, 调用该函数, 把bh置脏jbddirty. 要想自己管理data/metadata的写盘顺序, 首先就需要避开内存子系统的干预, 它在内存回收的时候并没有文件系统的相关信息, 只要page是dirty, 就可能按照任意顺序进行写盘. 所以jbd并不会像EXT2那样通过mark_buffer_dirty把metadata对应的page设置成dirty, 而只是把bh设置为jbddirty. 这样对于内存子系统来说, 该page是clean状态, 所以并不会触发写盘操作.
+
+data=journal + mmap会有怎样的结果? 一定不太好.
+
+### 事务在EXT3的使用
+
+#### 创建文件
+
+	ext3_create
+		handle = ext3_journal_start(dir, EXT3_DATA_TRANS_BLOCKS(dir->i_sb) +
+						   EXT3_INDEX_EXTRA_TRANS_BLOCKS + 3 +
+						   EXT3_MAXQUOTAS_INIT_BLOCKS(dir->i_sb));
+
+		inode = ext3_new_inode (handle, dir, &dentry->d_name, mode);
+			/* 修改inode bitmap */
+			bitmap_bh = read_inode_bitmap(sb, group);
+			ext3_journal_get_write_access(handle, bitmap_bh);
+			ext3_set_bit_atomic(sb_bgl_lock(sbi, group), ino, bitmap_bh->b_data);
+			ext3_journal_dirty_metadata(handle, bitmap_bh);
+
+			/* 修改group desc */
+			ext3_get_group_desc(sb, group, &bh2);
+			ext3_journal_get_write_access(handle, bh2);
+			le16_add_cpu(&gdp->bg_free_inodes_count, -1);
+			ext3_journal_dirty_metadata(handle, bh2);
+
+			ext3_mark_inode_dirty(handle, inode);
+				ext3_reserve_inode_write(handle, inode, &iloc);
+					ext3_get_inode_loc(inode, iloc);
+					ext3_journal_get_write_access(handle, iloc->bh);
+				/* 修改inode */
+				ext3_mark_iloc_dirty(handle, inode, &iloc);
+					struct buffer_head *bh = iloc->bh;
+					raw_inode->i_atime = cpu_to_le32(inode->i_atime.tv_sec);
+					ext3_journal_dirty_metadata(handle, bh);
+
+		ext3_add_nondir(handle, dentry, inode);
+			ext3_add_entry(handle, dentry, inode);
+				/* 在父目录里找到一个能容纳这个文件的block */
+				bh = ext3_bread(handle, dir, block, 0, &retval);
+				add_dirent_to_buf(handle, dentry, inode, NULL, bh);
+					/* 这个bh当作metadata */
+					ext3_journal_get_write_access(handle, bh);
+					/* 修改父目录的inode信息 */
+					ext3_mark_inode_dirty(handle, dir);
+					ext3_journal_dirty_metadata(handle, bh);
+			/* 再dirty一次, 似乎没有用? */
+			ext3_mark_inode_dirty(handle, inode);
+
+		ext3_journal_stop(handle);
 
 ### unmap_underlying_metadata
 
+之前讲过, 同一个磁盘block在内存中可能会存在2个缓存, 但这个函数肯定不是为了处理那些直接对裸设备的操作, 因为它只会对新分配的block才会调用. 试想一下EXT3文件系统的这个过程:
 
-*未完待续*
+1. 在transaction 1, 修改metadata block n
+2. 在transaction 2, 删除block n, 因为该bh还属于transaction 1, 不能执行bforget
+3. transaction 1 committed, 设置block n的bh为dirty, 准备回写
+4. transaction 2 committed, block n变成free状态
+5. get_block重新分配block n为data block, **需要unmap_underlying_metadata**
+6. 修改block n, 并写入磁盘
+7. 如果没有5的unmap_underlying_metadata, 由于bh为dirty, 写回到磁盘从而覆盖6中正确的数据
+
+如果换成free metadata block n, realloc metadata block n会出现什么状况? 因为第6步写metadata会先进入journal, 所以不会有问题.
+
+# 结语
+
+本文介绍了文件系统的一些基础知识, 希望有助于理解和开发文件系统. 从上层来看, 文件系统并不复杂, 即使是现代的文件系统, 其核心的设计也往往并不太多, 但是想要打造一个稳定可靠的文件系统却不容易, 往往需要几年甚至更久的打磨, 毕竟文件系统是与数据打交道, 不能有丝毫的差错. 细节决定成败.
