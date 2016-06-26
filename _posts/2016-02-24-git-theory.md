@@ -2,7 +2,7 @@
 layout: post
 title: Git Intro
 author: JamesW
-categories: Git
+categories: Tool
 ---
 
 转载须注明出处：[www.wufei.org](http://www.wufei.org)
