@@ -2,7 +2,7 @@
 layout: post
 title: scatterlist in xen-blkfront
 author: JamesW
-categories: Kernel, virtual
+categories: Kernel Virtualization
 ---
 
 转载须注明出处：[www.wufei.org](http://www.wufei.org)
