@@ -1,6 +1,6 @@
 ---
 layout: post
-title: slow memory access on Xen guest
+title: Slow memory access on Xen guest
 author: JamesW
 categories: Kernel Virtualization
 ---
