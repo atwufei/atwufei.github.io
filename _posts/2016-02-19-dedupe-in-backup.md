@@ -2,7 +2,7 @@
 layout: post
 title: Dedupe in Backup
 author: JamesW
-categories: Backup
+categories: Storage
 ---
 
 转载须注明出处：[www.wufei.org](http://www.wufei.org)

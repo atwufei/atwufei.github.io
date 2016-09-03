@@ -2,7 +2,7 @@
 layout: post
 title: Linux Filesystem Primer
 author: JamesW
-categories: Kernel
+categories: Kernel Storage
 ---
 
 转载须注明出处：[www.wufei.org](http://www.wufei.org)
