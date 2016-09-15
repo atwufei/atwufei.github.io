@@ -39,7 +39,7 @@ fsync对于Data Integrity的重要性不言而喻, 在我们的系统中fsync主
 
 在我的博客 [Linux Filesystem Primer](http://wufei.org/2016/06/13/filesystem/) 里讲到EXT3 fsync时, 由于FIFO journal的原因, 对于data=ordered模式下的fsync, 它不只是flush自己的data, 还需要flush之前和同一个journal里面其他文件的data page, 这就引入了[无谓的]dependency. 就像我们的系统里, 当同时有一个大文件写的时候, 由于这种依赖关系极大地延长了fsync的时间. 这个问题可以通过data=writeback来解决, fsync的performance提升了, 不过Integrity呢? 按理说是没有什么问题的, 不过企业级产品一般都比较保守.
 
-EXT4通过delayed allocation解决了这个问题, 既然磁盘都还没有分配, 当然也就谈不上flush的问题了. 经过测试, 如果disable delayed allocation, 这个测试结果跟EXT3就基本一致了. 当然delayed allocation因为长时间没有flush, 导致数据丢失的可能性增大.
+EXT4通过delayed allocation解决了这个问题, 既然磁盘都还没有分配, 当然也就谈不上flush的问题了. 经过测试, 如果disable delayed allocation, 这个测试结果跟EXT3就基本一致了. 当然delayed allocation因为长时间没有flush, 导致数据丢失的可能性增大, 而且delayed allocation总在某个时候需要allocation, 这个时候由于聚集了大量的数据, 反而会比EXT3引入更长的延时, 如果采用stress test可以明显看到EXT4在最差性能上其实比EXT3更差, 不过在真实的系统中, fsync恰好碰到EXT4 allocation的概率应该会很小.
 
 当然我们可以使用一个文件系统来单独存放registry, 这其实是个可行的方案, 从根本上解决了fsync在文件之间的依赖关系, 而不用去管具体使用哪个文件系统.
 
@@ -61,6 +61,10 @@ EXT4通过delayed allocation解决了这个问题, 既然磁盘都还没有分�
 不过一两倍其实并不一定能够起太大的作用. 这个角度并没有上面2个作用大.
 
 当然还有一种情况就是, 底层I/O带宽大幅降低, 比如RAID需要rebuild, 怎样分配更多的资源给fsync?哪个重要?
+
+## 解决办法part4: 减少fsync的个数
+
+这个完全取决于应用, 比如我们发现syslogd针对每一条log都会调用fsync, 那么我们系统里有的不重要log就选择不使用syslogd, 而采用自己的一套log方法. 
 
 ## 回顾问题
 

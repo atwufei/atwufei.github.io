@@ -129,7 +129,7 @@ kernel并不会保证这两份内存数据保持同步, 这是使用者需要考
 
 ### buffer_head
 
-虽然已经有单独的buffer cache, 文件系统的最小单元依然还是block, 一个page可以包含一个或多个block. 在文件系统创建的时候, block size就确定了. 当用户通过read/write系统调用访问某块disk block的时候, 一般会经过这些步骤:
+虽然已经没有单独的buffer cache, 文件系统的最小单元依然还是block, 一个page可以包含一个或多个block. 在文件系统创建的时候, block size就确定了. 当用户通过read/write系统调用访问某块disk block的时候, 一般会经过这些步骤:
 
 1. 映射[struct file, file->f_pos]到一个page, 该page->mapping对应到这个文件, page->index对应到f_pos
 2. 映射page到若干个buffer_head, 这里主要的任务是根据[page->mapping, page->index]找到block在块设备上的地址, 也就是[bh->b_bdev, bh->b_blocknr], 这需要文件系统get_block的帮助. 有了buffer_head的这些信息, 就可以通过submit_bh去读写磁盘上的数据.
@@ -182,7 +182,7 @@ write复杂的逻辑主要在write_begin, 对于EXT2它会做这些事情:
 
 除了read/write系统调用外, mmap也可以用来访问文件. mmap把page cache直接映射到用户态地址空间, 在访问的时候便不再需要用户空间和内核空间之间拷贝, 所以对性能有一定的好处. 不过混用read/write和mmap并不是一个好的编程实践, 虽然Linux会尽量保证其正确性, 有的OS并不保证其正确性, 也就是说要么使用read/write, 要么使用mmap, 不要同时使用.
 
-同时使用read/write和mmap的结果就是同一个物理page可能会产生两个虚拟地址, 一个是mmap的用户态地址, 另一个是read/write时在内核临时映射的地址, 有alias就有可能有麻烦(就像page cache和buffer cache一样), 它们可能映射到不同的cache line里面, 也就导致没有机制对它们进行同步. 这种情况在VIVT和VIPT cache的CPU上有可能发生, 考虑这种情况:
+同时使用read/write和mmap的结果就是同一个物理page可能会产生两个虚拟地址, 一个是mmap的用户态地址, 另一个是read/write时在内核[临时]映射的地址, 有alias就有可能有麻烦(就像page cache和buffer cache一样), 它们可能映射到不同的cache line里面, 也就导致没有机制对它们进行同步. 这种情况在VIVT和VIPT cache的CPU上有可能发生, 考虑这种情况:
 
         int val = 0x11111111;
         fd = open("abc", O_RDWR);
