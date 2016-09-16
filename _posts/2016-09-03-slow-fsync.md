@@ -64,7 +64,7 @@ EXT4通过delayed allocation解决了这个问题, 既然磁盘都还没有分�
 
 ## 解决办法part4: 减少fsync的个数
 
-这个完全取决于应用, 比如我们发现syslogd针对每一条log都会调用fsync, 那么我们系统里有的不重要log就选择不使用syslogd, 而采用自己的一套log方法. 
+这个完全取决于应用, 比如我们发现syslogd针对每一条log都会调用fsync, 那么我们系统里有的不重要log就选择不使用syslogd, 而采用自己的一套log方法. 又比如SQLite, 在以前使用rollback journal的时候, 在修改数据之前, 需要先备份该数据到别处(1), 然后在update-in-place数据(2), 在(1)处必然需要sync到磁盘否则没有journal的效果. 而在新的Write Ahead Log中, 只需要写入新的数据即可.
 
 ## 回顾问题
 
