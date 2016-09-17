@@ -165,3 +165,46 @@ I/O栈乱序有两个原因:
 ### queue theory
 
 ## blktrace
+
+	generic_make_request
+	  generic_make_request_checks(bio))
+		trace_block_bio_queue(q, bio);				// "Q"
+	  q->make_request_fn(q, bio);
+		blk_attempt_plug_merge(q, bio, &request_count, NULL);
+		--bio_attempt_back_merge(q, rq, bio);			// "M"
+		--bio_attempt_front_merge(q, rq, bio);			// "F"
+		req = get_request(q, rw_flags, bio, GFP_NOIO);
+		  rq = __get_request(rl, rw_flags, bio, gfp_mask);
+			trace_block_getrq(q, bio, rw_flags & 1);	// "G", if got
+		  trace_block_sleeprq(q, bio, rw_flags & 1);		// "S", if not
+		trace_block_plug(q);					// "P", if the 1st one after plug
+		add_acct_request(q, req, where);			// if not plugged
+		  __elv_add_request(q, rq, where);
+			trace_block_rq_insert(q, rq);			// "I"
+
+	blk_finish_plug
+	  blk_flush_plug_list(plug, false);
+		queue_unplugged(q, depth, from_schedule);
+		  trace_block_unplug(q, depth, !from_schedule);		// "U"
+		__elv_add_request(q, rq, ELEVATOR_INSERT_SORT_MERGE);
+		  trace_block_rq_insert(q, rq);				// "I"
+
+	scsi_request_fn
+	  req = blk_peek_request(q);
+		if (!(rq->cmd_flags & REQ_STARTED)) {
+		  rq->cmd_flags |= REQ_STARTED;
+		  trace_block_rq_issue(q, rq);				// "D"
+		}
+	  not_ready:
+		blk_requeue_request(q, req);
+		  trace_block_rq_requeue(q, rq);			// "R", 还有别的路径
+
+	# cmdline : /home/wufei/bin/perf record -ag -e block:block_rq_complete sleep 3
+	--- blk_update_request						// "C"
+		blk_update_bidi_request
+	   |          
+	   |--99.41%-- blk_end_bidi_request
+	   |          blk_end_request
+	   |          scsi_io_completion
+	   |          scsi_finish_command
+	   |          scsi_softirq_done
