@@ -162,7 +162,47 @@ I/O栈乱序有两个原因:
 
 ### 实现细节
 
+内核在每次request_queue (逻辑上把plug list也当成request_queue) 有变化是都会统计io stat:
+
+* blk_account_io_start
+* blk_account_io_done
+* blk_account_io_merge
+
+多个文件都可以读到这些统计结果, iostat命令也会自动选择某一个统计源, 不过这些源都是真实的数据, 这里以/proc/diskstats为例, 显式的具体格式可以参考Documentation/iostats.txt, 使用总共11个域的版本.
+
+	Field  1 -- # of reads completed
+		This is the total number of reads completed successfully.
+	Field  4 -- # of milliseconds spent reading
+		This is the total number of milliseconds spent by all reads (as
+		measured from __make_request() to end_that_request_last()).
+	Field  5 -- # of writes completed
+		This is the total number of writes completed successfully.
+	Field  8 -- # of milliseconds spent writing
+		This is the total number of milliseconds spent by all writes (as
+		measured from __make_request() to end_that_request_last()).
+	Field  9 -- # of I/Os currently in progress
+		The only field that should go to zero. Incremented as requests are
+		given to appropriate struct request_queue and decremented as they finish.
+	Field 10 -- # of milliseconds spent doing I/Os
+		This field increases so long as field 9 is nonzero.
+	Field 11 -- weighted # of milliseconds spent doing I/Os
+		This field is incremented at each I/O start, I/O completion, I/O
+		merge, or read of these stats by the number of I/Os in progress
+		(field 9) times the number of milliseconds spent doing I/O since the
+		last update of this field.  This can provide an easy measure of both
+		I/O completion time and the backlog that may be accumulating.
+
+* util = (F10b - F10a) / interval, 即有IO的时间/总时间
+* svctm = util / (r/s + w/s), Little Queuing Theory (util = r * Tser), svctm由util计算而得
+* avgqu-sz = (F11b - F11a) / interval, 每个interval时间内出现过的IO, 它对request queue的贡献可以计为(IO time / interval), 把所有的这些IO的贡献相加即为这个结果.
+
+	F11 = F4 + F8;	// 如果不总是成立, 差别在什么地方?
+
+* await = ((F4b - F4a) + (F8b - F8a)) / ((F1b - F1a) + (F5b - F5a)) = avgqu-sz / (r/s + w/s)
+
 ### queue theory
+
+[I/O: A Little Queuing Theory, RAID](https://people.eecs.berkeley.edu/~pattrsn/252S98/Lec13-queuing.pdf)
 
 ## blktrace
 
