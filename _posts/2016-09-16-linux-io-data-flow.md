@@ -45,7 +45,7 @@ I/O栈主要处理以下这些问题, 它们也决定了这个过程中需要使
 * request是后面merge, sort, dispatch的对象
 * request的大小受request_queue.queue_limits限制, 主要包括:
 	* max_segments, segment物理上是内存连续的
-	* max_segment_size
+	* max_segment_size, 如果支持cluster属性, 一个segment可以大于PAGE_SIZE
 	* max_sectors_kb
 * 一个request包含一个或多个bio 
 * 一个bio如果太大, 可能会被split成几个request
@@ -108,6 +108,8 @@ request queue是这里的核心, I/O用户或者plugging把requests放到request
 * 每种不同的iosched通过q->elevator->elevator_data维护一条queue, 当然具体实现可以是任何数据结构, 用来接收上层的requests.
 * request_queue通过q->queue_head维护一个dispatch queue, 底层driver按顺序service. iosched按照自己的优先级逻辑把request从上面那条queue的request移到dispatch queue里面.
 
+就像上面说的, request_queue中的request的个数超过一定限度, I/O系统就处于congestion状态, 这个是由q->nr_requests决定的. 但注意这并不是hard limit, 具体实现可以参考get_request.
+
 ### iosched
 
 iosched 主要做两件事情merge和sort.
@@ -122,7 +124,7 @@ iosched 主要做两件事情merge和sort.
 
 * merge的花销. 针对back merge, iosched的通用层实现了一个hash表来快速定位合适的request. 对于front merge, 这个操作则让每个iosched自己来选择, 比如deadline就通过自己的rbtree来查找, 可见会有一定的开销.
 
-* merge的标准. TODO nr_requsts
+* merge的标准. 并不是说bio跟某个request的LBA地址相连就可以merge, 这只是其中的一个必要条件, 还主要取决于queue_max_sectors(q)和queue_max_segments(q), 还有一些其他的约束条件. btw, 如果不是文件系统的request, 使用的是queue_max_hw_sectors(q)而不是queue_max_sectors(q), 具体可以参考ll_back_merge_fn().
 
 #### sort
 
@@ -130,11 +132,31 @@ sort的目的主要有两个:
 
 * 对于HDD, 为了减少磁盘seek/rotate的时间, 把request按照磁盘的顺序进行排列能够有效减少这部分开销. 当然对于SSD, 这样做并没有太大影响.
 
-* 对于不同的iosched, 会有自己的优先级考虑. 比如说deadline是不是到了, 是不是REQ_SYNC, 是不是要考虑fair, 等等不一而足. 所以iosched需要对request进行相应的排序, 然后在dispatch的时候按照这个顺序提供给底层driver.
+* 对于不同的iosched, 会有自己的优先级考虑. 比如说deadline是不是到了, 是不是REQ_SYNC, 是不是要考虑fair, 等等不一而足. 所以iosched需要对request进行相应的排序, 然后在dispatch的时候按照这个顺序提供给底层driver (elv_dispatch_sort会插到dispatch的中间, driver还是从头取).
 
 ### driver
 
+scsi_request_fn()
+
 ### io barrier
+
+为了实现I/O的依赖关系, 需要实现io barrier以消除这个过程中产生的乱序情况, 比如journal里面metadata需要先完成, 然后commit record才能够完成.
+
+I/O栈乱序有两个原因:
+
+* iosched允许乱序
+* disk里面有write cache, 写返回的时候并不意味着data已经写入盘面
+
+以前解决这个问题的办法, 也就是实现hard barrier的方法:
+
+* 针对iosched的乱序, 使用drain request queue的办法, 保证前面的request已经完成
+* 针对write cache的办法, 使用FLUSH命令, 或者disable cache都可以解决, 也可以结合FUA使用
+
+新的解决办法是让应用层也就是文件系统来解决这个依赖关系, 而不是drain queue, 当然write cache该怎么办还得怎么办. 但是这个会带来明显的好处吗? 注意FLUSH会去清空write cache, 其他的write request在这个过程中还能进行吗? LWN的Corbet在[The end of block barriers](http://lwn.net/Articles/400541/)的评论说:
+
+``The cache flush can happen in parallel with other I/O. Forcing specific blocks to persistent media can only slow things down, but they have to get there soon in any case. While the drive is executing the cache flush, it can be satisfying other requests whenever it's convenient. "Cache flush" doesn't mean "write only blocks in the cache" or "don't satisfy outstanding reads while you're at it". It will be far more efficient than a full queue drain.``
+
+不过原来的那种drain queue方式难道不能只drain write request吗?
 
 ## iostat
 
