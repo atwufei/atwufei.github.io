@@ -202,7 +202,18 @@ I/O栈乱序有两个原因:
 
 ### queue theory
 
-[I/O: A Little Queuing Theory, RAID](https://people.eecs.berkeley.edu/~pattrsn/252S98/Lec13-queuing.pdf)
+[I/O: A Little Queuing Theory, RAID](https://people.eecs.berkeley.edu/~pattrsn/252S98/Lec13-queuing.pdf) Page 7, 11 & 12
+
+![queue-1]({{ "/css/pics/io/little-queue-1.png"}})
+![queue-2]({{ "/css/pics/io/little-queue-2.png"}})
+
+* Tq: 队列已经有Lq个requests, 新加入的request在queue里面的时间等于Lq个requests的处理时间, 加上正在被处理request还需要的时间
+
+![queue-3]({{ "/css/pics/io/little-queue-3.png"}})
+
+* 等待时间Tq与利用率u的关系: 当利用率高到一定的程度时, 等待时间快速提高
+* 等待时间Tq与平均服务时间Tser的关系: 因为u=r\*Tser, 在r一定的情况下, Tser的优化对于Tq的提升不是简单的线性关系
+* 注意这里只是针对M/M/1模型
 
 ## blktrace
 
