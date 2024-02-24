@@ -8,6 +8,7 @@ tags:
   - Qemu
   - Debug
   - Performance
+  - RISC-V
 ---
 
 * content
